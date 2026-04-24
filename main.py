@@ -45,18 +45,21 @@ def main():
     )
 
     
-    # 3. Output metrics
+    # 3. Output metrics and save to CSV
     if metrics:
         print("\n--- Backtesting Metrics ---")
-        print(f"Total Return: {metrics['total_return']*100:.2f}%")
-        print(f"Annual Return: {metrics['annual_return']*100:.2f}%")
-        print(f"PnL (Total Profit/Loss): {metrics['pnl_percentage']:.2f}%")
-        print(f"Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
-        print(f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
-        print(f"Avg Holding Duration: {metrics['avg_holding_duration_hours']:.2f} hours")
-        print(f"Total Trades: {metrics['total_trades']}")
+        for k, v in metrics.items():
+            print(f"{k}: {v}")
         print(f"\nInitial Balance: ${initial_balance:,.2f}")
         print(f"Final Balance:   ${initial_balance * (1 + metrics['total_return']):,.2f}")
+
+        print("\nSaving results to CSV...")
+        results_df.to_csv("backtest_data.csv")
+        
+        if trades:
+            trades_df = pd.DataFrame(trades)
+            trades_df.to_csv("backtest_trades.csv", index=False)
+            print("Saved 'backtest_data.csv' and 'backtest_trades.csv'")
 
     
     # 4. Build self-contained replay HTML (data embedded inline to avoid CORS issues)
