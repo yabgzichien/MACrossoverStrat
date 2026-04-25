@@ -9,15 +9,16 @@ from backtester import run_backtest
 def main():
     # Configuration
     symbol = "BTCUSD"
-    timeframe = mt5.TIMEFRAME_M15
+    timeframe = mt5.TIMEFRAME_M30
     short_window = 24
     long_window = 52
-    rr_ratio = 1.5        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
+    rr_ratio = 1.75        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
     initial_balance = 10000.0  # Starting account balance (in quote currency)
-    risk_percent = 0.01   # Risk 1% of equity per trade
+    risk_percent = 0.01 # Risk 1% of equity per trade
     atr_period = 14       # ATR lookback period (bars)
-    atr_multiplier = 0.5  # SL distance = ATR * this multiplier
-
+    atr_multiplier = 1  # SL distance = ATR * this multiplier
+    adx_threshold = 20    # Minimum ADX value to take a trade (filters chop)
+    adx_period = 14       # ADX lookback period
 
 #     ======================================================================
 #   RECOMMENDED PARAMETERS
@@ -30,8 +31,8 @@ def main():
     
     # Define date range
     timezone = pytz.timezone("Etc/UTC")
-    start_date = datetime(2024, 1, 1, tzinfo=timezone)
-    end_date = datetime(2026, 1, 1, tzinfo=timezone)
+    start_date = datetime(2023, 1, 1, tzinfo=timezone)
+    end_date = datetime(2024, 1, 1, tzinfo=timezone)
     
     print(f"--- Starting Backtest for {symbol} ---")
     print(f"Timeframe: {timeframe}")
@@ -51,7 +52,9 @@ def main():
         initial_balance=initial_balance,
         risk_percent=risk_percent,
         atr_period=atr_period,
-        atr_multiplier=atr_multiplier
+        atr_multiplier=atr_multiplier,
+        adx_threshold=adx_threshold,
+        adx_period=adx_period
     )
 
     

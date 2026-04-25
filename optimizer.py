@@ -19,11 +19,13 @@ from backtester import run_backtest
 
 # Parameter ranges for random sampling
 PARAM_RANGES = {
-    'short_window':   [10, 15, 20, 24, 30, 40],
-    'long_window':    [40, 52, 60, 80, 100],
-    'rr_ratio':       [1, 1.25, 1.5, 1.75],
-    'atr_period':     [10, 14, 20, 30],
-    'atr_multiplier': [0.5 ,1.0, 1.5, 2.0, 2.5],
+    'short_window':   [24],
+    'long_window':    [52],
+    'rr_ratio':       [1, 1.25, 1.5, 1.75, 2, 2.5, 3],
+    'atr_period':     [14, 20],
+    'atr_multiplier': [0.3 ,0.5 ,1.0, 1.5, 2.0, 2.5],
+    'adx_threshold':  [0, 15, 20, 25],
+    'adx_period':     [14],
 }
 
 # Number of random samples per WFO fold
@@ -139,6 +141,8 @@ def optimize_on_fold(is_df, combos, fold_num):
                 risk_percent=RISK_PERCENT,
                 atr_period=params['atr_period'],
                 atr_multiplier=params['atr_multiplier'],
+                adx_threshold=params['adx_threshold'],
+                adx_period=params['adx_period'],
             )
             score = composite_score(metrics)
         except Exception:

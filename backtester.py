@@ -96,9 +96,10 @@ def calculate_metrics(df, trades):
 
 def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                  initial_balance=10000.0, risk_percent=0.01,
-                 atr_period=14, atr_multiplier=1.5):
+                 atr_period=14, atr_multiplier=1.5,
+                 adx_threshold=20, adx_period=14):
     """
-    Runs the moving average crossover backtest with ATR-based dynamic SL/TP.
+    Runs the moving average crossover backtest with ATR-based dynamic SL/TP and ADX filter.
 
     SL distance = ATR(atr_period) * atr_multiplier  (adapts to volatility)
     TP distance = SL distance * rr_ratio
@@ -113,6 +114,8 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
         risk_percent    : Fraction of equity to risk per trade (0.01 = 1%).
         atr_period      : Lookback period for ATR calculation.
         atr_multiplier  : Multiplier applied to ATR for SL distance.
+        adx_threshold   : Minimum ADX value required to take a crossover trade (filters chop).
+        adx_period      : Lookback period for ADX calculation.
     """
     df = df.copy()
     df['short_ma'] = df['close'].rolling(window=short_window).mean()
@@ -126,15 +129,28 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
     ], axis=1).max(axis=1)
     df['atr'] = df['tr'].rolling(window=atr_period).mean()
 
+    # --- ADX calculation ---
+    df['up_move'] = df['high'] - df['high'].shift(1)
+    df['down_move'] = df['low'].shift(1) - df['low']
+    df['plus_dm'] = np.where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), df['up_move'], 0)
+    df['minus_dm'] = np.where((df['down_move'] > df['up_move']) & (df['down_move'] > 0), df['down_move'], 0)
+    
+    tr_sum = df['tr'].rolling(window=adx_period).sum() + 1e-9 # avoid div zero
+    plus_di = 100 * (df['plus_dm'].rolling(window=adx_period).sum() / tr_sum)
+    minus_di = 100 * (df['minus_dm'].rolling(window=adx_period).sum() / tr_sum)
+    
+    df['dx'] = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-9))
+    df['adx'] = df['dx'].rolling(window=adx_period).mean()
+
     df['signal'] = 0
     df.loc[df['short_ma'] > df['long_ma'], 'signal'] = 1
     df.loc[df['short_ma'] < df['long_ma'], 'signal'] = -1
 
-    # Crossover: only fires on the bar where signal changes
+    # Crossover: only fires on the bar where signal changes AND ADX is above threshold
     df['prev_signal'] = df['signal'].shift(1)
     df['crossover'] = 0
-    df.loc[(df['signal'] == 1) & (df['prev_signal'] != 1), 'crossover'] = 1   # bullish cross
-    df.loc[(df['signal'] == -1) & (df['prev_signal'] != -1), 'crossover'] = -1  # bearish cross
+    df.loc[(df['signal'] == 1) & (df['prev_signal'] != 1) & (df['adx'] > adx_threshold), 'crossover'] = 1   # bullish cross
+    df.loc[(df['signal'] == -1) & (df['prev_signal'] != -1) & (df['adx'] > adx_threshold), 'crossover'] = -1  # bearish cross
     
     df['strategy_returns'] = 0.0
     df['position'] = 0
