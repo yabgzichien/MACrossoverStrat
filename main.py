@@ -8,20 +8,30 @@ from backtester import run_backtest
 
 def main():
     # Configuration
-    symbol = "XAUUSD"
+    symbol = "BTCUSD"
     timeframe = mt5.TIMEFRAME_M15
     short_window = 24
     long_window = 52
-    rr_ratio = 1.0        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
+    rr_ratio = 1.5        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
     initial_balance = 10000.0  # Starting account balance (in quote currency)
     risk_percent = 0.01   # Risk 1% of equity per trade
     atr_period = 14       # ATR lookback period (bars)
-    atr_multiplier = 1.5  # SL distance = ATR * this multiplier
+    atr_multiplier = 0.5  # SL distance = ATR * this multiplier
+
+
+#     ======================================================================
+#   RECOMMENDED PARAMETERS
+# ======================================================================
+    # short_window = 40
+    # long_window = 60.0
+    # rr_ratio = 1.0
+    # atr_period = 14.0
+    # atr_multiplier = 2.5
     
     # Define date range
     timezone = pytz.timezone("Etc/UTC")
-    start_date = datetime(2023, 1, 1, tzinfo=timezone)
-    end_date = datetime(2024, 1, 1, tzinfo=timezone)
+    start_date = datetime(2024, 1, 1, tzinfo=timezone)
+    end_date = datetime(2026, 1, 1, tzinfo=timezone)
     
     print(f"--- Starting Backtest for {symbol} ---")
     print(f"Timeframe: {timeframe}")

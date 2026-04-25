@@ -34,14 +34,64 @@ def calculate_metrics(df, trades):
     
     pnl = total_return * 100 
     
+    exit_trades = [t for t in trades if t['type'] == 'exit']
+    total_exits = len(exit_trades)
+    winning = len([t for t in exit_trades if t['pnl'] > 0])
+    win_rate = winning / total_exits if total_exits > 0 else 0.0
+
+    # Prop firm pass (Single linear track)
+    cum_ret = df['cumulative_returns'].values
+    running_peak = 1.0
+    prop_firm_pass = False
+    for val in cum_ret:
+        if val > running_peak:
+            running_peak = val
+        current_dd = (val - running_peak) / running_peak
+        current_ret = val - 1.0
+        if current_dd <= -0.08:
+            prop_firm_pass = False
+            break
+        if current_ret >= 0.15:
+            prop_firm_pass = True
+            break
+            
+    # Prop firm pass probability (Monte Carlo 1000 simulations on extracted trades)
+    prop_firm_pass_prob = 0.0
+    if total_exits >= 5:
+        trade_pnls = np.array([t['pnl'] for t in exit_trades])
+        n_sims = 1000
+        passes = 0
+        for _ in range(n_sims):
+            shuffled = np.random.permutation(trade_pnls)
+            peak = 1.0
+            val = 1.0
+            mc_passed = False
+            for pnl_val in shuffled:
+                val *= (1 + pnl_val)
+                if val > peak:
+                    peak = val
+                dd = (val - peak) / peak
+                ret = val - 1.0
+                if dd <= -0.08:
+                    break
+                if ret >= 0.15:
+                    mc_passed = True
+                    break
+            if mc_passed:
+                passes += 1
+        prop_firm_pass_prob = passes / n_sims
+
     return {
         'total_return': total_return,
         'annual_return': annual_return,
         'max_drawdown': max_drawdown,
         'sharpe_ratio': sharpe_ratio,
+        'win_rate': win_rate,
+        'prop_firm_pass': prop_firm_pass,
+        'prop_firm_pass_prob': prop_firm_pass_prob,
         'avg_holding_duration_hours': avg_holding_duration,
         'pnl_percentage': pnl,
-        'total_trades': len([t for t in trades if t['type'] == 'exit'])
+        'total_trades': total_exits
     }
 
 def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
