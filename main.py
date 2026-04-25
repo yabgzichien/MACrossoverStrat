@@ -8,31 +8,25 @@ from backtester import run_backtest
 
 def main():
     # Configuration
-    symbol = "BTCUSD"
-    timeframe = mt5.TIMEFRAME_M30
+    symbol = "XAUUSD"
+    timeframe = mt5.TIMEFRAME_M15
     short_window = 24
     long_window = 52
-    rr_ratio = 1.75        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
+    rr_ratio = 1.25        # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
     initial_balance = 10000.0  # Starting account balance (in quote currency)
     risk_percent = 0.01 # Risk 1% of equity per trade
     atr_period = 14       # ATR lookback period (bars)
     atr_multiplier = 1  # SL distance = ATR * this multiplier
     adx_threshold = 20    # Minimum ADX value to take a trade (filters chop)
     adx_period = 14       # ADX lookback period
+    sma_filter_period = 200 # SMA directional filter (0 to disable)
+    prop_max_loss = -0.08   # Max drawdown limit for prop firm pass probability
+    prop_target_profit = 0.15 # Profit target for prop firm pass probability
 
-#     ======================================================================
-#   RECOMMENDED PARAMETERS
-# ======================================================================
-    # short_window = 40
-    # long_window = 60.0
-    # rr_ratio = 1.0
-    # atr_period = 14.0
-    # atr_multiplier = 2.5
-    
     # Define date range
     timezone = pytz.timezone("Etc/UTC")
-    start_date = datetime(2023, 1, 1, tzinfo=timezone)
-    end_date = datetime(2024, 1, 1, tzinfo=timezone)
+    start_date = datetime(2022, 2, 1, tzinfo=timezone)
+    end_date = datetime(2024, 3, 1, tzinfo=timezone)
     
     print(f"--- Starting Backtest for {symbol} ---")
     print(f"Timeframe: {timeframe}")
@@ -54,7 +48,10 @@ def main():
         atr_period=atr_period,
         atr_multiplier=atr_multiplier,
         adx_threshold=adx_threshold,
-        adx_period=adx_period
+        adx_period=adx_period,
+        sma_filter_period=sma_filter_period,
+        prop_max_loss=prop_max_loss,
+        prop_target_profit=prop_target_profit
     )
 
     
@@ -86,7 +83,9 @@ def main():
             'low': round(float(row['low']), 5),
             'close': round(float(row['close']), 5),
             'short_ma': None if pd.isna(row['short_ma']) else round(float(row['short_ma']), 5),
-            'long_ma': None if pd.isna(row['long_ma']) else round(float(row['long_ma']), 5)
+            'long_ma': None if pd.isna(row['long_ma']) else round(float(row['long_ma']), 5),
+            'sma_filter': None if ('sma_filter' not in row or pd.isna(row['sma_filter'])) else round(float(row['sma_filter']), 5),
+            'equity': round(float(row.get('cumulative_returns', 1.0)) * initial_balance, 2)
         })
 
     processed_trades = []
@@ -156,27 +155,29 @@ def main():
 
     const m = replayData.metrics;
     const ib = replayData.initial_balance || 10000;
-    const fb = ib * (1 + (m.total_return || 0));
+    
+    // We will build dynamic DOM elements for the real-time stats
     document.getElementById('metricsDisplay').innerHTML = `
         <div class="metric-card">
-            <span class="metric-title">Total Return</span>
-            <span class="metric-value ${{m.total_return >= 0 ? 'win' : 'loss'}}">${{(m.total_return*100).toFixed(2)}}%</span>
+            <span class="metric-title">Live Equity</span>
+            <span class="metric-value win" id="rtEquity">$${{ib.toFixed(2)}}</span>
         </div>
         <div class="metric-card">
-            <span class="metric-title">Final Balance</span>
-            <span class="metric-value ${{fb >= ib ? 'win' : 'loss'}}">$${{fb.toFixed(2)}}</span>
+            <span class="metric-title">Live Return</span>
+            <span class="metric-value win" id="rtReturn">0.00%</span>
         </div>
         <div class="metric-card">
-            <span class="metric-title">Max Drawdown</span>
-            <span class="metric-value loss">${{(m.max_drawdown*100).toFixed(2)}}%</span>
+            <span class="metric-title" style="color:#2962ff">Short MA (${{replayData.short_window || 24}})</span>
         </div>
         <div class="metric-card">
-            <span class="metric-title">Sharpe Ratio</span>
-            <span class="metric-value">${{m.sharpe_ratio.toFixed(2)}}</span>
+            <span class="metric-title" style="color:#ff9800">Long MA (${{replayData.long_window || 52}})</span>
         </div>
         <div class="metric-card">
-            <span class="metric-title">Total Trades</span>
-            <span class="metric-value">${{m.total_trades}}</span>
+            <span class="metric-title" style="color:#B2B5BE">200 SMA Filter</span>
+        </div>
+        <div style="margin-left:auto; text-align:right" class="metric-card">
+            <span class="metric-title">Final Stats</span>
+            <span class="metric-value" style="font-size:13px">WinRate: ${{(m.win_rate*100).toFixed(1)}}% | Sharpe: ${{m.sharpe_ratio.toFixed(2)}}</span>
         </div>
     `;
 
@@ -198,6 +199,7 @@ def main():
     }});
     const shortMaSeries = chart.addLineSeries({{ color: '#2962ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }});
     const longMaSeries  = chart.addLineSeries({{ color: '#ff9800', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }});
+    const smaFilterSeries = chart.addLineSeries({{ color: '#B2B5BE', lineWidth: 2, lineStyle: 1, priceLineVisible: false, lastValueVisible: false }});
 
     // KEY FIX: extend auto-scale to always include SL/TP levels
     // createPriceLine is excluded from LWC auto-scale by default!
@@ -229,6 +231,7 @@ def main():
     // Active price line handles
     let slPriceLine = null;
     let tpPriceLine = null;
+    let entryPriceLine = null;
 
     // Build a trade lookup map keyed by bar timestamp for O(1) access
     const tradeMap = {{}};
@@ -265,10 +268,19 @@ def main():
     function clearPriceLines() {{
         if (slPriceLine) {{ candleSeries.removePriceLine(slPriceLine); slPriceLine = null; }}
         if (tpPriceLine) {{ candleSeries.removePriceLine(tpPriceLine); tpPriceLine = null; }}
+        if (entryPriceLine) {{ candleSeries.removePriceLine(entryPriceLine); entryPriceLine = null; }}
     }}
 
     function drawPriceLines(sl, tp, direction, entryPrice) {{
         clearPriceLines();
+        entryPriceLine = candleSeries.createPriceLine({{
+            price: entryPrice,
+            color: direction === 1 ? '#2962ff' : '#ff9800',
+            lineWidth: 2,
+            lineStyle: 1,
+            axisLabelVisible: true,
+            title: 'ENTRY'
+        }});
         slPriceLine = candleSeries.createPriceLine({{
             price: sl,
             color: '#FF5252',
@@ -304,6 +316,14 @@ def main():
         candleSeries.update({{ time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close }});
         if (bar.short_ma !== null) shortMaSeries.update({{ time: bar.time, value: bar.short_ma }});
         if (bar.long_ma  !== null) longMaSeries.update({{ time: bar.time, value: bar.long_ma }});
+        if (bar.sma_filter !== null) smaFilterSeries.update({{ time: bar.time, value: bar.sma_filter }});
+
+        if (bar.equity !== undefined) {{
+            const rtReturn = ((bar.equity - ib) / ib * 100).toFixed(2);
+            document.getElementById('rtEquity').textContent = `$${{bar.equity.toFixed(2)}}`;
+            document.getElementById('rtReturn').textContent = `${{rtReturn}}%`;
+            document.getElementById('rtReturn').className = `metric-value ${{rtReturn >= 0 ? 'win' : 'loss'}}`;
+        }}
 
         const localTrades = tradeMap[bar.time] || [];
         let markersChanged = false;
@@ -364,6 +384,7 @@ def main():
         candleSeries.setData([]);
         shortMaSeries.setData([]);
         longMaSeries.setData([]);
+        smaFilterSeries.setData([]);
         // Re-run warmup silently
         for (let i = 0; i < Math.min(PREFILL, total); i++) updateChart();
         restoreActivePriceLines();     // Redraw lines for any open trade at warmup end

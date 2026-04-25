@@ -26,10 +26,11 @@ PARAM_RANGES = {
     'atr_multiplier': [0.3 ,0.5 ,1.0, 1.5, 2.0, 2.5],
     'adx_threshold':  [0, 15, 20, 25],
     'adx_period':     [14],
+    'sma_filter_period': [0, 200],  # 0 to disable
 }
 
 # Number of random samples per WFO fold
-N_RANDOM_SAMPLES = 100
+N_RANDOM_SAMPLES = 300
 
 # WFO settings
 WFO_IN_SAMPLE_MONTHS  = 6
@@ -64,7 +65,7 @@ def log(msg=""):
 
 def composite_score(metrics):
     """
-    Composite score from win_rate, sharpe, max_drawdown, and prop_firm_pass.
+    Composite score from win_rate, sharpe, max_drawdown, and prop_firm_pass_prob.
     Higher is better.
     """
     if metrics is None or metrics.get('total_trades', 0) < 5:
@@ -73,7 +74,7 @@ def composite_score(metrics):
     sharpe  = metrics['sharpe_ratio']
     winrate = metrics['win_rate']
     dd      = 1 + metrics['max_drawdown']  # -0.20 -> 0.80
-    prop    = 1.0 if metrics.get('prop_firm_pass', False) else 0.0
+    prop    = metrics.get('prop_firm_pass_prob', 0.0)
 
     return (W_SHARPE * sharpe) + (W_WINRATE * winrate) + (W_DRAWDOWN * dd) + (W_PROPFIRM * prop)
 
@@ -143,6 +144,9 @@ def optimize_on_fold(is_df, combos, fold_num):
                 atr_multiplier=params['atr_multiplier'],
                 adx_threshold=params['adx_threshold'],
                 adx_period=params['adx_period'],
+                sma_filter_period=params.get('sma_filter_period', 0),
+                prop_max_loss=PROP_MAX_LOSS,
+                prop_target_profit=PROP_TARGET_PROFIT
             )
             score = composite_score(metrics)
         except Exception:
@@ -175,6 +179,11 @@ def evaluate_oos(oos_df, params):
         risk_percent=RISK_PERCENT,
         atr_period=params['atr_period'],
         atr_multiplier=params['atr_multiplier'],
+        adx_threshold=params['adx_threshold'],
+        adx_period=params['adx_period'],
+        sma_filter_period=params.get('sma_filter_period', 0),
+        prop_max_loss=PROP_MAX_LOSS,
+        prop_target_profit=PROP_TARGET_PROFIT
     )
     return metrics, trades
 
@@ -254,7 +263,7 @@ def run_wfo(df):
 
 # =================== MONTE CARLO ENGINE ===================
 
-def prop_firm_sim(equity_curve, target=PROP_PROFIT_TARGET, dd_limit=PROP_MAX_DD_LIMIT):
+def prop_firm_sim(equity_curve, target=PROP_TARGET_PROFIT, dd_limit=PROP_MAX_LOSS):
     """Check if an equity curve passes the prop firm challenge."""
     peak = 1.0
     for val in equity_curve:
@@ -269,7 +278,7 @@ def prop_firm_sim(equity_curve, target=PROP_PROFIT_TARGET, dd_limit=PROP_MAX_DD_
     return False
 
 
-def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS):
+def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LOSS, prop_target_profit=PROP_TARGET_PROFIT):
     """
     Shuffle trade order N times, replay equity curve each time.
     Includes prop firm pass probability.
@@ -286,41 +295,42 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS):
     log(f"{'='*70}")
 
     results = []
-    prop_passes = 0
+    total_passes = 0
+    total_fails = 0
 
     for sim in range(n_sims):
         shuffled = np.random.permutation(trade_pnls)
 
-        # Replay equity curve
-        equity = np.ones(n_trades + 1)
-        for j, pnl in enumerate(shuffled):
-            equity[j + 1] = equity[j] * (1 + pnl)
-
-        final_return = equity[-1] - 1
-        peak = np.maximum.accumulate(equity)
-        drawdowns = (equity - peak) / peak
-        max_dd = drawdowns.min()
-
-        # Sharpe from trade-level returns
-        if shuffled.std() != 0:
-            sharpe = (shuffled.mean() / shuffled.std()) * np.sqrt(n_trades)
-        else:
-            sharpe = 0
-
-        wins = np.sum(shuffled > 0)
-        win_rate = wins / n_trades
-
-        # Prop firm check
-        passed = prop_firm_sim(equity)
-        if passed:
-            prop_passes += 1
+        # Replay equity curve with reset attempts
+        val = 1.0
+        peak = 1.0
+        
+        sim_passes = 0
+        sim_fails = 0
+        
+        for pnl in shuffled:
+            val += pnl
+            if val > peak:
+                peak = val
+            
+            dd = (val - peak) / peak
+            ret = val - 1.0
+            
+            if dd <= prop_max_loss:
+                total_fails += 1
+                sim_fails += 1
+                val = 1.0
+                peak = 1.0
+            elif ret >= prop_target_profit:
+                total_passes += 1
+                sim_passes += 1
+                val = 1.0
+                peak = 1.0
 
         results.append({
-            'final_return': final_return,
-            'max_drawdown': max_dd,
-            'sharpe_ratio': sharpe,
-            'win_rate': win_rate,
-            'prop_firm_pass': passed,
+            'total_passes': sim_passes,
+            'total_fails': sim_fails,
+            'pass_rate': sim_passes / (sim_passes + sim_fails) if (sim_passes + sim_fails) > 0 else 0
         })
 
         if (sim + 1) % 200 == 0:
@@ -343,11 +353,12 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS):
         else:
             log(f"{col:<20} {p5:>10.3f} {p25:>10.3f} {p50:>10.3f} {p75:>10.3f} {p95:>10.3f}")
 
-    # Prop firm pass probability
-    prop_rate = prop_passes / n_sims * 100
+    # Final Pass Probability
+    total_attempts = total_passes + total_fails
+    prop_rate = (total_passes / total_attempts * 100) if total_attempts > 0 else 0
     log(f"\n{'='*70}")
-    log(f"  PROP FIRM PASS PROBABILITY: {prop_rate:.1f}%")
-    log(f"  ({prop_passes}/{n_sims} simulations hit +{PROP_PROFIT_TARGET*100:.0f}% before -{abs(PROP_MAX_DD_LIMIT)*100:.0f}% DD)")
+    log(f"  AGGREGATED PROP FIRM PASS PROBABILITY: {prop_rate:.1f}%")
+    log(f"  (Total Passes: {total_passes} | Total Fails: {total_fails} across all shuffles)")
     log(f"{'='*70}")
 
     # Robustness check
@@ -371,8 +382,8 @@ def main():
     symbol    = "XAUUSD"
     timeframe = mt5.TIMEFRAME_M15
     timezone  = pytz.timezone("Etc/UTC")
-    start_date = datetime(2023, 1, 1, tzinfo=timezone)
-    end_date   = datetime(2024, 1, 1, tzinfo=timezone)
+    start_date = datetime(2022, 2, 1, tzinfo=timezone)
+    end_date   = datetime(2024, 3, 1, tzinfo=timezone)
 
     log(f"Loading data for {symbol} ({start_date.date()} -> {end_date.date()})...")
     data = get_mt5_data(symbol, timeframe, start_date, end_date)
