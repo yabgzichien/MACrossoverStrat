@@ -19,10 +19,11 @@ def main():
     atr_multiplier = 1  # SL distance = ATR * this multiplier
     adx_threshold = 20    # Minimum ADX value to take a trade (filters chop)
     adx_period = 14       # ADX lookback period
-    sma_filter_period = 0 # SMA directional filter (0 to disable)
+    sma_filter_period = 200 # SMA directional filter (0 to disable)
     prop_max_loss = -0.1   # Max drawdown limit for prop firm pass probability
     prop_target_profit = 0.08 # Profit target for prop firm pass probability
     use_compounding = False # Set to True to allow lot sizing to grow/shrink with equity
+    crossover_exec_bars = 0 # Execute trade N bars after the crossover event
 
     # Define date range
     timezone = pytz.timezone("Etc/UTC")
@@ -53,7 +54,8 @@ def main():
         sma_filter_period=sma_filter_period,
         prop_max_loss=prop_max_loss,
         prop_target_profit=prop_target_profit,
-        use_compounding=use_compounding
+        use_compounding=use_compounding,
+        crossover_exec_bars=crossover_exec_bars
     )
 
     

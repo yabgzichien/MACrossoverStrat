@@ -53,6 +53,10 @@ W_PROPFIRM = 0.3   # Reward params that pass the prop firm test
 # Backtest constants
 INITIAL_BALANCE = 10000.0
 RISK_PERCENT    = 0.01
+PROP_MAX_LOSS   = -0.1
+PROP_TARGET_PROFIT = 0.08
+USE_COMPOUNDING = False
+CROSSOVER_EXEC_BARS = 1
 
 
 def log(msg=""):
@@ -147,7 +151,8 @@ def optimize_on_fold(is_df, combos, fold_num):
                 sma_filter_period=params.get('sma_filter_period', 0),
                 prop_max_loss=PROP_MAX_LOSS,
                 prop_target_profit=PROP_TARGET_PROFIT,
-                use_compounding=USE_COMPOUNDING
+                use_compounding=USE_COMPOUNDING,
+                crossover_exec_bars=CROSSOVER_EXEC_BARS
             )
             score = composite_score(metrics)
         except Exception:
@@ -185,7 +190,8 @@ def evaluate_oos(oos_df, params):
         sma_filter_period=params.get('sma_filter_period', 0),
         prop_max_loss=PROP_MAX_LOSS,
         prop_target_profit=PROP_TARGET_PROFIT,
-        use_compounding=USE_COMPOUNDING
+        use_compounding=USE_COMPOUNDING,
+        crossover_exec_bars=CROSSOVER_EXEC_BARS
     )
     return metrics, trades
 

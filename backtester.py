@@ -126,7 +126,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                  adx_threshold=20, adx_period=14,
                  sma_filter_period=200,
                  prop_max_loss=-0.08, prop_target_profit=0.15,
-                 use_compounding=True):
+                 use_compounding=True, crossover_exec_bars=0):
     """
     Runs the moving average crossover backtest with ATR dynamic SL/TP, ADX, and SMA directional filter.
 
@@ -146,6 +146,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
         adx_threshold   : Minimum ADX value required to take a crossover trade (filters chop).
         adx_period      : Lookback period for ADX calculation.
         sma_filter_period : Long-term SMA period. If > 0, only take longs when price > SMA, shorts when < SMA.
+        crossover_exec_bars: Number of bars to delay execution of trade entry and reversal after a crossover.
     """
     df = df.copy()
     df['short_ma'] = df['close'].rolling(window=short_window).mean()
@@ -196,6 +197,10 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
     df.loc[long_cond, 'crossover'] = 1   # bullish cross
     df.loc[short_cond, 'crossover'] = -1  # bearish cross
     
+    # Delayed signals
+    df['execution_trigger'] = df['crossover'].shift(crossover_exec_bars).fillna(0)
+    df['reversal_signal'] = df['signal'].shift(crossover_exec_bars).fillna(0)
+    
     df['strategy_returns'] = 0.0
     df['position'] = 0
     df['cumulative_returns'] = 1.0
@@ -236,7 +241,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                 else:
                     current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'tp', 'price': tp, 'pnl': pnl, 'equity': current_equity})
-            elif row['signal'] == -1: # Reversal
+            elif row['reversal_signal'] == -1: # Reversal
                 price_change = row['close'] - entry_price
                 pnl = (price_change / current_sl_dist) * risk_percent if current_sl_dist != 0 else 0.0
                 if use_compounding:
@@ -275,7 +280,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                 else:
                     current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'tp', 'price': tp, 'pnl': pnl, 'equity': current_equity})
-            elif row['signal'] == 1: # Reversal
+            elif row['reversal_signal'] == 1: # Reversal
                 price_change = entry_price - row['close']
                 pnl = (price_change / current_sl_dist) * risk_percent if current_sl_dist != 0 else 0.0
                 if use_compounding:
@@ -302,7 +307,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                 df.at[curr_idx, 'position'] = 0
                 continue
 
-            cross = row['crossover']
+            cross = row['execution_trigger']
             if cross == 1:
                 current_sl_dist = atr_val * atr_multiplier
                 in_position = 1
