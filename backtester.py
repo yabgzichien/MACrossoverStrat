@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def calculate_metrics(df, trades, prop_max_loss=-0.08, prop_target_profit=0.15):
+def calculate_metrics(df, trades, prop_max_loss=-0.08, prop_target_profit=0.15, use_compounding=True):
     """
     Calculates backtesting metrics from the DataFrame and trades list.
     """
@@ -48,28 +48,36 @@ def calculate_metrics(df, trades, prop_max_loss=-0.08, prop_target_profit=0.15):
             running_peak = val
         current_dd = (val - running_peak) / running_peak
         current_ret = val - 1.0
-        if current_dd <= -0.08:
+        if current_dd <= prop_max_loss:
             prop_firm_pass = False
             break
-        if current_ret >= 0.15:
+        if current_ret >= prop_target_profit:
             prop_firm_pass = True
             break
             
     # Prop firm pass probability (Monte Carlo 1000 simulations with reset attempts)
     prop_firm_pass_prob = 0.0
+    avg_days_to_pass = 0.0
     if total_exits >= 5:
         trade_pnls = np.array([t['pnl'] for t in exit_trades])
         n_sims = 1000
         total_mc_passes = 0
         total_mc_fails = 0
+        total_pass_trades = 0
         
         for _ in range(n_sims):
             shuffled = np.random.permutation(trade_pnls)
             peak = 1.0
             val = 1.0
+            trades_in_attempt = 0
             
             for pnl_val in shuffled:
-                val += pnl_val
+                trades_in_attempt += 1
+                if use_compounding:
+                    val *= (1 + pnl_val)
+                else:
+                    val += pnl_val
+                    
                 if val > peak:
                     peak = val
                 
@@ -81,15 +89,22 @@ def calculate_metrics(df, trades, prop_max_loss=-0.08, prop_target_profit=0.15):
                     # Reset account for next attempt
                     val = 1.0
                     peak = 1.0
+                    trades_in_attempt = 0
                 elif ret >= prop_target_profit:
                     total_mc_passes += 1
+                    total_pass_trades += trades_in_attempt
                     # Reset account for next attempt
                     val = 1.0
                     peak = 1.0
+                    trades_in_attempt = 0
                     
         total_attempts = total_mc_passes + total_mc_fails
         if total_attempts > 0:
             prop_firm_pass_prob = total_mc_passes / total_attempts
+            
+        avg_trades_to_pass = total_pass_trades / total_mc_passes if total_mc_passes > 0 else 0
+        avg_days_per_trade = days / total_exits if total_exits > 0 else 0
+        avg_days_to_pass = avg_trades_to_pass * avg_days_per_trade
 
     return {
         'total_return': total_return,
@@ -99,6 +114,7 @@ def calculate_metrics(df, trades, prop_max_loss=-0.08, prop_target_profit=0.15):
         'win_rate': win_rate,
         'prop_firm_pass': prop_firm_pass,
         'prop_firm_pass_prob': prop_firm_pass_prob,
+        'avg_days_to_pass': avg_days_to_pass,
         'avg_holding_duration_hours': avg_holding_duration,
         'pnl_percentage': pnl,
         'total_trades': total_exits
@@ -109,7 +125,8 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
                  atr_period=14, atr_multiplier=1.5,
                  adx_threshold=20, adx_period=14,
                  sma_filter_period=200,
-                 prop_max_loss=-0.08, prop_target_profit=0.15):
+                 prop_max_loss=-0.08, prop_target_profit=0.15,
+                 use_compounding=True):
     """
     Runs the moving average crossover backtest with ATR dynamic SL/TP, ADX, and SMA directional filter.
 
@@ -206,17 +223,26 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
             if row['low'] <= sl:
                 pnl = -risk_percent
                 in_position = 0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'sl', 'price': sl, 'pnl': pnl, 'equity': current_equity})
             elif row['high'] >= tp:
                 pnl = risk_percent * rr_ratio
                 in_position = 0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'tp', 'price': tp, 'pnl': pnl, 'equity': current_equity})
             elif row['signal'] == -1: # Reversal
                 price_change = row['close'] - entry_price
                 pnl = (price_change / current_sl_dist) * risk_percent if current_sl_dist != 0 else 0.0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'reversal', 'price': row['close'], 'pnl': pnl, 'equity': current_equity})
                 # Enter Short
                 atr_val = row['atr']
@@ -236,17 +262,26 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
             if row['high'] >= sl:
                 pnl = -risk_percent
                 in_position = 0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'sl', 'price': sl, 'pnl': pnl, 'equity': current_equity})
             elif row['low'] <= tp:
                 pnl = risk_percent * rr_ratio
                 in_position = 0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'tp', 'price': tp, 'pnl': pnl, 'equity': current_equity})
             elif row['signal'] == 1: # Reversal
                 price_change = entry_price - row['close']
                 pnl = (price_change / current_sl_dist) * risk_percent if current_sl_dist != 0 else 0.0
-                current_equity += (pnl * initial_balance)
+                if use_compounding:
+                    current_equity *= (1 + pnl)
+                else:
+                    current_equity += (pnl * initial_balance)
                 trades.append({'time': str(curr_idx), 'type': 'exit', 'reason': 'reversal', 'price': row['close'], 'pnl': pnl, 'equity': current_equity})
                 # Enter Long
                 atr_val = row['atr']
@@ -287,7 +322,7 @@ def run_backtest(df, short_window=50, long_window=200, rr_ratio=1.0,
         df.at[curr_idx, 'strategy_returns'] = pnl
         df.at[curr_idx, 'equity'] = current_equity
 
-    metrics = calculate_metrics(df, trades, prop_max_loss=prop_max_loss, prop_target_profit=prop_target_profit)
+    metrics = calculate_metrics(df, trades, prop_max_loss=prop_max_loss, prop_target_profit=prop_target_profit, use_compounding=use_compounding)
     
     return df, metrics, trades
 

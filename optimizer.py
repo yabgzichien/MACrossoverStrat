@@ -146,7 +146,8 @@ def optimize_on_fold(is_df, combos, fold_num):
                 adx_period=params['adx_period'],
                 sma_filter_period=params.get('sma_filter_period', 0),
                 prop_max_loss=PROP_MAX_LOSS,
-                prop_target_profit=PROP_TARGET_PROFIT
+                prop_target_profit=PROP_TARGET_PROFIT,
+                use_compounding=USE_COMPOUNDING
             )
             score = composite_score(metrics)
         except Exception:
@@ -183,7 +184,8 @@ def evaluate_oos(oos_df, params):
         adx_period=params['adx_period'],
         sma_filter_period=params.get('sma_filter_period', 0),
         prop_max_loss=PROP_MAX_LOSS,
-        prop_target_profit=PROP_TARGET_PROFIT
+        prop_target_profit=PROP_TARGET_PROFIT,
+        use_compounding=USE_COMPOUNDING
     )
     return metrics, trades
 
@@ -278,7 +280,7 @@ def prop_firm_sim(equity_curve, target=PROP_TARGET_PROFIT, dd_limit=PROP_MAX_LOS
     return False
 
 
-def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LOSS, prop_target_profit=PROP_TARGET_PROFIT):
+def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LOSS, prop_target_profit=PROP_TARGET_PROFIT, use_compounding=USE_COMPOUNDING):
     """
     Shuffle trade order N times, replay equity curve each time.
     Includes prop firm pass probability.
@@ -307,9 +309,15 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
         
         sim_passes = 0
         sim_fails = 0
+        trades_in_attempt = 0
         
         for pnl in shuffled:
-            val += pnl
+            trades_in_attempt += 1
+            if use_compounding:
+                val *= (1 + pnl)
+            else:
+                val += pnl
+                
             if val > peak:
                 peak = val
             
@@ -321,11 +329,14 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
                 sim_fails += 1
                 val = 1.0
                 peak = 1.0
+                trades_in_attempt = 0
             elif ret >= prop_target_profit:
                 total_passes += 1
                 sim_passes += 1
+                total_pass_trades += trades_in_attempt
                 val = 1.0
                 peak = 1.0
+                trades_in_attempt = 0
 
         results.append({
             'total_passes': sim_passes,
@@ -356,8 +367,11 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
     # Final Pass Probability
     total_attempts = total_passes + total_fails
     prop_rate = (total_passes / total_attempts * 100) if total_attempts > 0 else 0
+    avg_trades_to_pass = total_pass_trades / total_passes if total_passes > 0 else 0
+    
     log(f"\n{'='*70}")
     log(f"  AGGREGATED PROP FIRM PASS PROBABILITY: {prop_rate:.1f}%")
+    log(f"  (Avg Trades to Pass: {avg_trades_to_pass:.1f})")
     log(f"  (Total Passes: {total_passes} | Total Fails: {total_fails} across all shuffles)")
     log(f"{'='*70}")
 
