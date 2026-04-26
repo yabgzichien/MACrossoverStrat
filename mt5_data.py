@@ -34,19 +34,57 @@ def get_mt5_data(symbol, timeframe, start_date, end_date):
         print("MT5 initialization failed, error code =", mt5.last_error())
         return None
 
-    # Fetch rates
-    rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
-    
+    # Fetch rates in chunks to bypass MT5 download limits
+    chunk_size = 50000
+    all_rates = []
+    current_end = end_date
+    start_compare = start_date.replace(tzinfo=None) if start_date.tzinfo else start_date
+
+    while True:
+        rates = mt5.copy_rates_from(symbol, timeframe, current_end, chunk_size)
+        if rates is None or len(rates) == 0:
+            break
+            
+        df_chunk = pd.DataFrame(rates)
+        df_chunk['time'] = pd.to_datetime(df_chunk['time'], unit='s')
+        all_rates.append(df_chunk)
+        
+        min_time = df_chunk['time'].min()
+        min_compare = min_time.replace(tzinfo=None) if min_time.tzinfo else min_time
+        
+        if min_compare <= start_compare:
+            break
+        if len(rates) < chunk_size:
+            break
+            
+        next_end = min_time.to_pydatetime()
+        if current_end.tzinfo:
+            next_end = next_end.replace(tzinfo=current_end.tzinfo)
+            
+        if next_end >= current_end:
+            break
+        current_end = next_end
+        
     # Shut down MT5 connection
     mt5.shutdown()
 
-    if rates is None or len(rates) == 0:
+    if not all_rates:
         print(f"No data found for {symbol} on the specified range.")
         return None
 
-    # Convert to DataFrame
-    df = pd.DataFrame(rates)
-    df['time'] = pd.to_datetime(df['time'], unit='s')
+    # Concatenate all chunks and clean up
+    df = pd.concat(all_rates)
+    df.drop_duplicates(subset=['time'], inplace=True)
+    df.sort_values(by='time', inplace=True)
+    
+    # Filter strictly to the requested range
+    end_compare = end_date.replace(tzinfo=None) if end_date.tzinfo else end_date
+    df = df[(df['time'] >= start_compare) & (df['time'] <= end_compare)]
+    
+    if df.empty:
+        print(f"No data found for {symbol} on the specified range after filtering.")
+        return None
+        
     df.set_index('time', inplace=True)
     
     # Save to cache

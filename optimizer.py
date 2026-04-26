@@ -17,20 +17,22 @@ from backtester import run_backtest
 
 # =================== CONFIGURATION ===================
 
+
 # Parameter ranges for random sampling
 PARAM_RANGES = {
     'short_window':   [24],
     'long_window':    [52],
-    'rr_ratio':       [1, 1.25, 1.5, 1.75, 2, 2.5, 3],
+    'rr_ratio':       [0.5, 0.7, 1, 1.25],
     'atr_period':     [14, 20],
-    'atr_multiplier': [0.3 ,0.5 ,1.0, 1.5, 2.0, 2.5],
-    'adx_threshold':  [0, 15, 20, 25],
+    'atr_multiplier': [0.3 ,0.5 ,1.0, 1.5],
+    'adx_threshold':  [15, 20],
     'adx_period':     [14],
-    'sma_filter_period': [0, 200],  # 0 to disable
+    'sma_filter_period': [100, 200],  # 0 to disable
+    'crossover_exec_bars': [0, 1, 2, 3],
 }
 
 # Number of random samples per WFO fold
-N_RANDOM_SAMPLES = 300
+N_RANDOM_SAMPLES = 150
 
 # WFO settings
 WFO_IN_SAMPLE_MONTHS  = 6
@@ -45,10 +47,10 @@ PROP_PROFIT_TARGET = 0.15   # 15% profit target
 PROP_MAX_DD_LIMIT  = -0.08  # 8% max drawdown limit
 
 # Scoring weights
-W_SHARPE   = 0.2
+W_SHARPE   = 0
 W_WINRATE  = 0
-W_DRAWDOWN = 0.5
-W_PROPFIRM = 0.3   # Reward params that pass the prop firm test
+W_DRAWDOWN = 0
+W_PROPFIRM = 1   # Reward params that pass the prop firm test
 
 # Backtest constants
 INITIAL_BALANCE = 10000.0
@@ -56,7 +58,7 @@ RISK_PERCENT    = 0.01
 PROP_MAX_LOSS   = -0.1
 PROP_TARGET_PROFIT = 0.08
 USE_COMPOUNDING = False
-CROSSOVER_EXEC_BARS = 1
+CROSSOVER_EXEC_BARS = 0
 
 
 def log(msg=""):
@@ -152,7 +154,7 @@ def optimize_on_fold(is_df, combos, fold_num):
                 prop_max_loss=PROP_MAX_LOSS,
                 prop_target_profit=PROP_TARGET_PROFIT,
                 use_compounding=USE_COMPOUNDING,
-                crossover_exec_bars=CROSSOVER_EXEC_BARS
+                crossover_exec_bars=params.get('crossover_exec_bars', 0)
             )
             score = composite_score(metrics)
         except Exception:
@@ -191,7 +193,7 @@ def evaluate_oos(oos_df, params):
         prop_max_loss=PROP_MAX_LOSS,
         prop_target_profit=PROP_TARGET_PROFIT,
         use_compounding=USE_COMPOUNDING,
-        crossover_exec_bars=CROSSOVER_EXEC_BARS
+        crossover_exec_bars=params.get('crossover_exec_bars', 0)
     )
     return metrics, trades
 
@@ -305,6 +307,7 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
     results = []
     total_passes = 0
     total_fails = 0
+    total_pass_trades = 0
 
     for sim in range(n_sims):
         shuffled = np.random.permutation(trade_pnls)
@@ -316,8 +319,23 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
         sim_passes = 0
         sim_fails = 0
         trades_in_attempt = 0
+
+        c_val = 1.0
+        c_peak = 1.0
+        c_max_dd = 0.0
         
         for pnl in shuffled:
+            # Continuous metrics tracking
+            if use_compounding:
+                c_val *= (1 + pnl)
+            else:
+                c_val += pnl
+            if c_val > c_peak:
+                c_peak = c_val
+            c_dd = (c_val - c_peak) / c_peak if c_peak > 0 else 0
+            if c_dd < c_max_dd:
+                c_max_dd = c_dd
+
             trades_in_attempt += 1
             if use_compounding:
                 val *= (1 + pnl)
@@ -327,7 +345,7 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
             if val > peak:
                 peak = val
             
-            dd = (val - peak) / peak
+            dd = (val - peak) / peak if peak > 0 else 0
             ret = val - 1.0
             
             if dd <= prop_max_loss:
@@ -344,10 +362,17 @@ def run_monte_carlo(trade_pnls, n_sims=MC_SIMULATIONS, prop_max_loss=PROP_MAX_LO
                 peak = 1.0
                 trades_in_attempt = 0
 
+        mean_pnl = np.mean(shuffled)
+        std_pnl = np.std(shuffled) if np.std(shuffled) != 0 else 1e-9
+
         results.append({
             'total_passes': sim_passes,
             'total_fails': sim_fails,
-            'pass_rate': sim_passes / (sim_passes + sim_fails) if (sim_passes + sim_fails) > 0 else 0
+            'pass_rate': sim_passes / (sim_passes + sim_fails) if (sim_passes + sim_fails) > 0 else 0,
+            'final_return': c_val - 1.0,
+            'max_drawdown': c_max_dd,
+            'sharpe_ratio': (mean_pnl / std_pnl) * np.sqrt(252),
+            'win_rate': np.mean(shuffled > 0)
         })
 
         if (sim + 1) % 200 == 0:
@@ -402,7 +427,7 @@ def main():
     symbol    = "XAUUSD"
     timeframe = mt5.TIMEFRAME_M15
     timezone  = pytz.timezone("Etc/UTC")
-    start_date = datetime(2022, 2, 1, tzinfo=timezone)
+    start_date = datetime(2022, 10, 1, tzinfo=timezone)
     end_date   = datetime(2024, 3, 1, tzinfo=timezone)
 
     log(f"Loading data for {symbol} ({start_date.date()} -> {end_date.date()})...")

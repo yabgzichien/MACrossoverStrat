@@ -32,3 +32,17 @@ Final Balance:   $17,261.98
     use_compounding = False # Set to True to allow lot sizing to grow/shrink with equity
 
 #
+
+
+
+======================================================================
+  RECOMMENDED PARAMETERS
+======================================================================
+  short_window = 24.0
+  long_window = 52.0
+  rr_ratio = 0.5
+  atr_period = 14.0
+  atr_multiplier = 1.5
+  adx_threshold = 20.0
+  adx_period = 14.0
+  sma_filter_period = 200.0
