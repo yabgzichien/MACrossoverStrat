@@ -12,18 +12,18 @@ def main():
     timeframe = mt5.TIMEFRAME_M15
     short_window = 24
     long_window = 52
-    rr_ratio = 1       # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
+    rr_ratio = 0.5      # Reward / Risk multiplier (1 = 1:1, 2 = 1:2, etc.)
     initial_balance = 10000.0  # Starting account balance (in quote currency)
-    risk_percent = 0.01 # Risk 1% of equity per trade
+    risk_percent = 0.02 # Risk 1% of equity per trade
     atr_period = 14       # ATR lookback period (bars)
     atr_multiplier = 1  # SL distance = ATR * this multiplier
     adx_threshold = 20    # Minimum ADX value to take a trade (filters chop)
     adx_period = 14       # ADX lookback period
-    sma_filter_period = 100 # SMA directional filter (0 to disable)
+    sma_filter_period = 150 # SMA directional filter (0 to disable)
     prop_max_loss = -0.1   # Max drawdown limit for prop firm pass probability
-    prop_target_profit = 0.08 # Profit target for prop firm pass probability
+    prop_target_profit = 0.05 # Profit target for prop firm pass probability
     use_compounding = False # Set to True to allow lot sizing to grow/shrink with equity
-    crossover_exec_bars = 3 # Execute trade N bars after the crossover event
+    crossover_exec_bars = 0 # Execute trade N bars after the crossover event
 
     # Define date range
     timezone = pytz.timezone("Etc/UTC")

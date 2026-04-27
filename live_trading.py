@@ -15,12 +15,12 @@ SHORT_WINDOW = 24
 LONG_WINDOW = 52
 RR_RATIO = 0.5
 ATR_PERIOD = 14
-ATR_MULTIPLIER = 1.5
+ATR_MULTIPLIER = 1
 ADX_THRESHOLD = 20
 ADX_PERIOD = 14
 SMA_FILTER_PERIOD = 200
 INITIAL_BALANCE = 10000.0  # Used for constant risk calculation
-RISK_PERCENT = 0.01        # 1% risk of INITIAL_BALANCE per trade
+RISK_PERCENT = 0.0125        # 1% risk of INITIAL_BALANCE per trade
 
 CSV_LOG_FILE = "live_trades.csv"
 
@@ -233,9 +233,14 @@ def main():
     print("Monitoring markets...")
     
     last_processed_candle_time = None
+    start_time = datetime.now()
     
     try:
         while True:
+            current_time = datetime.now()
+            running_minutes = int((current_time - start_time).total_seconds() / 60)
+            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] Bot running for {running_minutes} minutes. Checking markets...")
+            
             signal, atr_val, candle_time = get_latest_signal_and_atr()
             
             if signal is None:
